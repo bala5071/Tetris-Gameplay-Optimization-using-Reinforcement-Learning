@@ -20,10 +20,10 @@ class DQNNetwork(nn.Module):
         return self.fc3(x)
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, learning_rate=0.001, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
+    def __init__(self, state_size, action_size, learning_rate=0.0005, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.998):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=10000)
+        self.memory = deque(maxlen=20000)
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
@@ -57,14 +57,14 @@ class DQNAgent:
 
     def update(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
-        if len(self.memory) >= 64:  # batch size
+        if len(self.memory) >= 128:  # batch size
             self._train()
 
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
     def _train(self):
-        batch = random.sample(self.memory, 64)
+        batch = random.sample(self.memory, 128)
         states, actions, rewards, next_states, dones = zip(*batch)
 
         states = torch.FloatTensor(states).to(self.device)

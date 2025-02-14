@@ -1,7 +1,7 @@
 import numpy as np
 
 class QLearningAgent:
-    def __init__(self, state_size, action_size, learning_rate=0.001, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
+    def __init__(self, state_size, action_size, learning_rate=0.01, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.999):
         self.state_size = state_size
         self.action_size = action_size
         self.learning_rate = learning_rate
