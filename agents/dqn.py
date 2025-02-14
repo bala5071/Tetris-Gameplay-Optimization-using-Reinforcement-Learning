@@ -5,64 +5,79 @@ import numpy as np
 from collections import deque
 import random
 
-class DQN(nn.Module):
-    def __init__(self, input_shape, num_actions):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(np.prod(input_shape), 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, num_actions)
-        )
-    
+class DQNNetwork(nn.Module):
+    def __init__(self, state_size, action_size):
+        super(DQNNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_size, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(128, action_size)
+
     def forward(self, x):
-        return self.net(x.flatten(1))
+        if not isinstance(x, torch.Tensor):
+            x = torch.FloatTensor(x)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
 
 class DQNAgent:
-    def __init__(self, input_shape, num_actions):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.net = DQN(input_shape, num_actions).to(self.device)
-        self.target_net = DQN(input_shape, num_actions).to(self.device)
-        self.optimizer = optim.Adam(self.net.parameters(), lr=1e-3)
+    def __init__(self, state_size, action_size, learning_rate=0.001, gamma=0.99, epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995):
+        self.state_size = state_size
+        self.action_size = action_size
         self.memory = deque(maxlen=10000)
-        self.batch_size = 64
-        self.gamma = 0.99
-        self.epsilon = 1.0
-        self.epsilon_decay = 0.995
-        self.epsilon_min = 0.01
-        
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.epsilon_min = epsilon_min
+        self.epsilon_decay = epsilon_decay
+        self.learning_rate = learning_rate
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.model = DQNNetwork(state_size, action_size).to(self.device)
+        self.target_model = DQNNetwork(state_size, action_size).to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.update_target()
+
+    def preprocess_state(self, state):
+        board = state['board'].flatten()
+        holes = state['holes']
+        bumpiness = state['bumpiness']
+        height = state['height']
+        return np.concatenate([board, holes, bumpiness, height])
+
+    def update_target(self):
+        self.target_model.load_state_dict(self.model.state_dict())
+
     def act(self, state):
-        if np.random.rand() < self.epsilon:
-            return np.random.randint(self.net.num_actions)
-        state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        q_values = self.net(state_t)
-        return q_values.argmax().item()
-    
+        if np.random.rand() <= self.epsilon:
+            return np.random.randint(self.action_size)
+        
+        with torch.no_grad():
+            state = torch.FloatTensor(state).to(self.device)
+            action_values = self.model(state)
+            return torch.argmax(action_values).item()
+
     def update(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
-        if len(self.memory) < self.batch_size:
-            return
-        
-        batch = random.sample(self.memory, self.batch_size)
+        if len(self.memory) >= 64:  # batch size
+            self._train()
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+
+    def _train(self):
+        batch = random.sample(self.memory, 64)
         states, actions, rewards, next_states, dones = zip(*batch)
-        
-        states = torch.FloatTensor(np.array(states)).to(self.device)
+
+        states = torch.FloatTensor(states).to(self.device)
         actions = torch.LongTensor(actions).to(self.device)
         rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(np.array(next_states)).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).to(self.device)
-        
-        q_values = self.net(states).gather(1, actions.unsqueeze(1))
-        next_q_values = self.target_net(next_states).max(1)[0].detach()
-        targets = rewards + (1 - dones) * self.gamma * next_q_values
-        
-        loss = nn.MSELoss()(q_values.squeeze(), targets)
+
+        current_q_values = self.model(states).gather(1, actions.unsqueeze(1))
+        next_q_values = self.target_model(next_states).max(1)[0].detach()
+        target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
+
+        loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-        
-        self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
-        
-    def update_target(self):
-        self.target_net.load_state_dict(self.net.state_dict())
